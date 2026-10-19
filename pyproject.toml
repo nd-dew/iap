@@ -1,0 +1,17 @@
+[project]
+name = "iap"
+version = "0.1.0"
+description = "Run the Odoo AI IAP service locally and point dev databases at it"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "rich>=13",
+    "typer>=0.12",
+]
+
+[project.scripts]
+iap = "iap.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.8,<0.10"]
+build-backend = "uv_build"
