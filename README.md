@@ -3,6 +3,52 @@
 Run the Odoo AI IAP service (`iap-apps/iap_ai`) locally, so dev databases can use
 AI features without the public `ai.api.odoo.com` (which can't call back into localhost).
 
+![iap start, then iap connect --all](docs/demo.gif)
+
+## How it fits together
+
+Local Odoo AI development needs three things wired up. `iap` does the wiring:
+
+```mermaid
+flowchart LR
+    subgraph base["① IAP base · Odoo saas-19.4"]
+        direction TB
+        core["odoo/ + enterprise/"]
+        venv[".venv"]
+    end
+
+    subgraph apps["② IAP code · iap-apps"]
+        direction TB
+        iap_ai["iap_ai/odoo_ai"]
+        iap_common["iap_common"]
+    end
+
+    tool{{"iap"}}
+    service["local IAP service<br/>localhost:8086 · db iap<br/>test mode, no credits"]
+
+    subgraph client["③ your Odoo instance · any worktree / version"]
+        db[("dev database<br/>ai.endpoint = localhost:8086")]
+    end
+
+    providers(["OpenAI · Vertex / Gemini"])
+
+    base -- "runs on" --> tool
+    apps -- "addons + requirements" --> tool
+    tool -- "iap start" --> service
+    tool -. "iap connect" .-> db
+    db -- "AI requests" --> service
+    service -. "async results (webhook)" .-> db
+    service -- "OPENAI_API_KEY<br/>GEAP_SERVICE_ACCOUNT" --> providers
+```
+
+1. **IAP base**: the IAP service is itself an Odoo app, so it needs an Odoo to run on
+   (here `saas-19.4`, the version `iap-apps` targets), with its Python environment.
+2. **IAP code**: `iap-apps` provides the `odoo_ai` service module and its shared tooling.
+   `iap start` loads them on top of the base, adding their Python requirements for that run only.
+3. **Your Odoo instance**: whichever worktree you are developing in, on any version.
+   `iap connect` points its database's `ai.endpoint` at the local service; since both
+   run on your machine, the service can also call back into it with async results.
+
 ## Install
 
 ```bash
