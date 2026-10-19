@@ -333,15 +333,35 @@ def logs(
     _show_logs(lines)
 
 
-@app.command()
-def connect(
-    db: str = typer.Argument(..., help="Client database to point at the local IAP."),
-    reset: bool = typer.Option(False, "--reset", help="Remove the override, back to the public Odoo AI endpoint."),
-) -> None:
-    """Point a dev database's `ai.endpoint` at the local IAP service."""
-    if not _db_exists(db):
-        console.print(f"[red]Database {db!r} does not exist.[/]")
-        raise typer.Exit(1)
+def _ai_databases() -> list[str]:
+    """Local databases with the `ai` module installed (other than the IAP's own)."""
+    res = subprocess.run(
+        ["psql", "-d", "postgres", "-Atc", "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname"],
+        capture_output=True, text=True,
+    )
+    dbs = []
+    for name in res.stdout.split():
+        if name in ("postgres", DB):
+            continue
+        check = subprocess.run(
+            ["psql", "-d", name, "-Atc", "SELECT 1 FROM ir_module_module WHERE name = 'ai' AND state = 'installed'"],
+            capture_output=True, text=True,
+        )
+        if check.stdout.strip() == "1":  # non-Odoo databases just fail the query
+            dbs.append(name)
+    return dbs
+
+
+def _current_endpoint(db: str) -> str:
+    res = subprocess.run(
+        ["psql", "-d", db, "-Atc", "SELECT value FROM ir_config_parameter WHERE key = 'ai.endpoint'"],
+        capture_output=True, text=True,
+    )
+    return res.stdout.strip()
+
+
+def _set_endpoint(db: str, reset: bool) -> str | None:
+    """Set (or remove) `ai.endpoint` in a database; returns an error message on failure."""
     if reset:
         sql = "DELETE FROM ir_config_parameter WHERE key = 'ai.endpoint'"
     else:
@@ -353,8 +373,40 @@ def connect(
         ["psql", "-d", db, "-v", "ON_ERROR_STOP=1", "-v", f"endpoint={ENDPOINT}", "-q"],
         input=sql, capture_output=True, text=True,
     )
-    if res.returncode:
-        console.print(f"[red]{res.stderr.strip()}[/]")
+    return res.stderr.strip() if res.returncode else None
+
+
+@app.command()
+def connect(
+    db: str = typer.Argument(None, help="Client database to point at the local IAP."),
+    all_: bool = typer.Option(False, "--all", "-a", help="Every local database with the ai module installed."),
+    reset: bool = typer.Option(False, "--reset", help="Remove the override, back to the public Odoo AI endpoint."),
+    force: bool = typer.Option(False, "--force", help="With --all, also change databases set to another endpoint."),
+) -> None:
+    """Point a dev database's `ai.endpoint` at the local IAP service."""
+    if all_ == bool(db):
+        console.print("[red]Pass either a database name or --all.[/]")
         raise typer.Exit(1)
+    if db and not _db_exists(db):
+        console.print(f"[red]Database {db!r} does not exist.[/]")
+        raise typer.Exit(1)
+    dbs = [db] if db else _ai_databases()
+    if not dbs:
+        console.print("[dim]No local database has the ai module installed.[/]")
+        return
     target = "the public Odoo AI endpoint" if reset else ENDPOINT
-    console.print(f"[green]{db}[/] now uses {target} (no restart needed).")
+    failed = False
+    for name in dbs:
+        current = _current_endpoint(name)
+        if all_ and not force and current and current != ENDPOINT:
+            # Deliberately pointed elsewhere (e.g. ai.test.odoo.com); leave it alone
+            console.print(f"[yellow]{name}[/] skipped: uses {current} [dim](--force to change)[/]")
+            continue
+        if error := _set_endpoint(name, reset):
+            console.print(f"[red]{name}: {error}[/]")
+            failed = True
+        else:
+            console.print(f"[green]{name}[/] now uses {target}")
+    console.print("[dim]No restart needed.[/]")
+    if failed:
+        raise typer.Exit(1)
