@@ -41,13 +41,27 @@ Odoo 19.4 server in the background. It uses your own AI keys (`OPENAI_API_KEY`,
 `iap connect` tells your local databases to send their AI requests to this server
 instead of Odoo's.
 
+## Assumptions
+
+`iap` doesn't set anything up for you. It expects:
+
+- **Linux or macOS**, with `uv`, `git` and `psql` installed
+- **A local PostgreSQL** you can use without a password (like a normal Odoo dev setup)
+- **Odoo 19.4** in `~/repos/Odoo/wt/saas-19.4/odoo`, with a ready Python venv in
+  `~/repos/Odoo/wt/saas-19.4/.venv` (the [odoo-wt](https://github.com/nd-dew/odoo-wt) layout)
+- **iap-apps** cloned in `~/repos/iap-apps`, on the `saas-19.4` branch (private repo, needs access)
+- **Your AI keys** in the environment: `OPENAI_API_KEY` and `GEAP_SERVICE_ACCOUNT`
+- **Port 8086** free
+
+Different paths or port? See [Configuration](#configuration).
+
 ## Configuration
 
 All optional, via environment variables:
 
 | Variable | Default |
 | --- | --- |
-| `IAP_ODOO_DIR` | `~/repos/Odoo/wt/saas-19.4` (Odoo the service runs on, with `odoo/` and `enterprise/`) |
+| `IAP_ODOO_DIR` | `~/repos/Odoo/wt/saas-19.4` (Odoo the service runs on: `odoo/`, and `enterprise/` if present, which is optional) |
 | `IAP_APPS_DIR` | `~/repos/iap-apps` |
 | `IAP_PYTHON` | `$IAP_ODOO_DIR/.venv/bin/python` |
 | `IAP_PORT` | `8086` |

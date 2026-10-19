@@ -29,7 +29,11 @@ STATE_DIR = Path(os.getenv("XDG_STATE_HOME", HOME / ".local/state")) / "iap"
 PID_FILE = STATE_DIR / "iap.pid"
 LOG_FILE = STATE_DIR / "iap.log"
 ENDPOINT = f"http://localhost:{PORT}"
-REPOS = {"odoo": ODOO_DIR / "odoo", "enterprise": ODOO_DIR / "enterprise", "iap-apps": APPS_DIR}
+REPOS = {
+    name: path
+    for name, path in (("odoo", ODOO_DIR / "odoo"), ("enterprise", ODOO_DIR / "enterprise"), ("iap-apps", APPS_DIR))
+    if path.is_dir()
+}
 # Provider credentials read by iap_ai: OpenAI, and the Vertex / Gemini Enterprise service account
 API_KEYS = ("OPENAI_API_KEY", "GEAP_SERVICE_ACCOUNT")
 START_TIMEOUT = 90
@@ -213,9 +217,10 @@ def _start(update: bool = False) -> None:
     if missing := [k for k in API_KEYS if not os.getenv(k)]:
         console.print(f"[yellow]{', '.join(missing)} not set; calls to that provider will fail.[/]")
 
+    # Enterprise isn't needed by odoo_ai; it's only used if present
     addons = ",".join(str(p) for p in (
         ODOO_DIR / "odoo/addons", ODOO_DIR / "enterprise", APPS_DIR / "iap_ai", APPS_DIR / "iap_common",
-    ))
+    ) if p.is_dir())
     first_run = not _db_exists(DB)
     cmd = [
         # The Odoo venv provides Odoo's deps; iap_ai's own deps are layered on top for this run only
