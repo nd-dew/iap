@@ -15,6 +15,8 @@ uv tool install -e ~/repos/iap
 iap                 # start it, or show status + recent logs if already running
 iap connect <db>    # point a dev database's ai.endpoint at the local IAP
 iap connect <db> --reset   # back to the public endpoint
+iap status          # status, how odoo / enterprise / iap-apps compare to upstream, recent logs
+iap fetch           # fetch upstream first, for fresh 'behind' counts (or: iap status --fetch)
 iap logs -f         # follow the log
 iap restart -u      # restart and update odoo_ai (e.g. after switching iap-apps branch)
 iap stop

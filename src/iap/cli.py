@@ -29,6 +29,7 @@ STATE_DIR = Path(os.getenv("XDG_STATE_HOME", HOME / ".local/state")) / "iap"
 PID_FILE = STATE_DIR / "iap.pid"
 LOG_FILE = STATE_DIR / "iap.log"
 ENDPOINT = f"http://localhost:{PORT}"
+REPOS = {"odoo": ODOO_DIR / "odoo", "enterprise": ODOO_DIR / "enterprise", "iap-apps": APPS_DIR}
 # Provider credentials read by iap_ai: OpenAI, and the Vertex / Gemini Enterprise service account
 API_KEYS = ("OPENAI_API_KEY", "GEAP_SERVICE_ACCOUNT")
 START_TIMEOUT = 90
@@ -87,9 +88,56 @@ def _db_exists(name: str) -> bool:
     return res.stdout.strip() == "1"
 
 
-def _git_branch(path: Path) -> str:
-    res = subprocess.run(["git", "-C", str(path), "branch", "--show-current"], capture_output=True, text=True)
-    return res.stdout.strip() or "?"
+def _git(path: Path, *args: str) -> str | None:
+    res = subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True)
+    return res.stdout.strip() if res.returncode == 0 else None
+
+
+def _ago(seconds: float) -> str:
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= size:
+            return f"{int(seconds // size)}{unit} ago"
+    return "just now"
+
+
+def _repo_state(path: Path) -> str:
+    """Branch, and how it compares to its upstream as of the last fetch."""
+    branch = _git(path, "branch", "--show-current") or "?"
+    upstream = _git(path, "rev-parse", "--abbrev-ref", "@{u}")
+    if not upstream:
+        return f"{branch}  [dim](no upstream)[/]"
+    ahead, behind = map(int, (_git(path, "rev-list", "--left-right", "--count", "HEAD...@{u}") or "0 0").split())
+    if behind:
+        state = f"[yellow]{behind} behind {upstream}[/]"
+    else:
+        state = f"[green]up to date with {upstream}[/]"
+    if ahead:
+        state += f", [cyan]{ahead} local commit{'s' * (ahead > 1)}[/]"
+    if _git(path, "status", "--porcelain", "--untracked-files=no"):
+        state += ", [cyan]uncommitted changes[/]"
+    fetch_head = _git(path, "rev-parse", "--path-format=absolute", "--git-path", "FETCH_HEAD")
+    try:
+        fetched = f"fetched {_ago(time.time() - Path(fetch_head).stat().st_mtime)}"
+    except (TypeError, OSError):
+        fetched = "never fetched"
+    return f"{state}  [dim]({fetched})[/]"
+
+
+def _fetch(paths: list[Path]) -> None:
+    """Fetch only the upstream branch of each repo, in parallel."""
+    procs = []
+    for path in paths:
+        upstream = _git(path, "rev-parse", "--abbrev-ref", "@{u}")
+        if upstream:
+            remote, _, branch = upstream.partition("/")
+            procs.append((path, subprocess.Popen(
+                ["git", "-C", str(path), "fetch", "--quiet", remote, branch],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+            )))
+    with console.status("[bold]fetching upstream ..."):
+        for path, proc in procs:
+            if proc.wait():
+                console.print(f"[red]fetch failed in {path}:[/] {proc.stderr.read().strip()}")
 
 
 def _tail(n: int) -> list[str]:
@@ -137,9 +185,10 @@ def _show_status(pid: int | None, log_lines: int = 15) -> None:
         t.add_row("pid", f"{pid}  (up {_uptime(pid)})")
     t.add_row("endpoint", ENDPOINT)
     t.add_row("database", DB)
-    t.add_row("odoo", f"{ODOO_DIR}  [dim]({_git_branch(ODOO_DIR / 'odoo')})[/]")
-    t.add_row("iap-apps", f"{APPS_DIR}  [dim]({_git_branch(APPS_DIR)})[/]")
     t.add_row("log", str(LOG_FILE))
+    t.add_row()
+    for name, path in REPOS.items():
+        t.add_row(name, f"{path}\n{_repo_state(path)}")
     console.print(Panel(t, title="local IAP", title_align="left"))
     if log_lines:
         _show_logs(log_lines)
@@ -256,9 +305,21 @@ def restart(update: bool = typer.Option(False, "--update", "-u", help="Update th
 
 
 @app.command()
-def status(lines: int = typer.Option(15, "--lines", "-n", help="Log lines to show.")) -> None:
-    """Show whether the IAP service is running, with recent logs."""
+def status(
+    lines: int = typer.Option(15, "--lines", "-n", help="Log lines to show."),
+    fetch: bool = typer.Option(False, "--fetch", "-f", help="Fetch upstream first, for fresh 'behind' counts."),
+) -> None:
+    """Show whether the IAP service is running, how its code compares to upstream, and recent logs."""
+    if fetch:
+        _fetch(list(REPOS.values()))
     _show_status(_read_pid(), log_lines=lines)
+
+
+@app.command()
+def fetch() -> None:
+    """Fetch upstream for the Odoo and iap-apps repos the service runs on, and show the status."""
+    _fetch(list(REPOS.values()))
+    _show_status(_read_pid(), log_lines=0)
 
 
 @app.command()
