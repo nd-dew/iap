@@ -24,12 +24,13 @@ ODOO_DIR = Path(os.getenv("IAP_ODOO_DIR", HOME / "repos/Odoo/wt/saas-19.4"))
 APPS_DIR = Path(os.getenv("IAP_APPS_DIR", HOME / "repos/iap-apps"))
 PYTHON = Path(os.getenv("IAP_PYTHON", ODOO_DIR / ".venv/bin/python"))
 PORT = int(os.getenv("IAP_PORT", "8086"))
-DB = os.getenv("IAP_DB", "iap_ai_db")
+DB = os.getenv("IAP_DB", "iap")
 STATE_DIR = Path(os.getenv("XDG_STATE_HOME", HOME / ".local/state")) / "iap"
 PID_FILE = STATE_DIR / "iap.pid"
 LOG_FILE = STATE_DIR / "iap.log"
 ENDPOINT = f"http://localhost:{PORT}"
-API_KEYS = ("OPENAI_API_KEY", "GEMINI_API_KEY")
+# Provider credentials read by iap_ai: OpenAI, and the Vertex / Gemini Enterprise service account
+API_KEYS = ("OPENAI_API_KEY", "GEAP_SERVICE_ACCOUNT")
 START_TIMEOUT = 90
 
 app = typer.Typer(
@@ -160,8 +161,8 @@ def _start(update: bool = False) -> None:
         if not path.exists():
             console.print(f"[red]Missing {path}[/] (see IAP_ODOO_DIR / IAP_APPS_DIR / IAP_PYTHON)")
             raise typer.Exit(1)
-    if not any(os.getenv(k) for k in API_KEYS):
-        console.print(f"[yellow]None of {', '.join(API_KEYS)} is set; AI calls will fail.[/]")
+    if missing := [k for k in API_KEYS if not os.getenv(k)]:
+        console.print(f"[yellow]{', '.join(missing)} not set; calls to that provider will fail.[/]")
 
     addons = ",".join(str(p) for p in (
         ODOO_DIR / "odoo/addons", ODOO_DIR / "enterprise", APPS_DIR / "iap_ai", APPS_DIR / "iap_common",

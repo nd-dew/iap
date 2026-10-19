@@ -21,7 +21,7 @@ iap stop
 ```
 
 The service runs in `ODOO_AI_TEST_MODE` (no credit checks) and uses the provider
-keys from your environment (`OPENAI_API_KEY`, `GEMINI_API_KEY`, ...).
+keys from your environment (`OPENAI_API_KEY`, and `GEAP_SERVICE_ACCOUNT` for Vertex / Gemini).
 The first start creates its database and installs `odoo_ai`.
 
 ## Configuration
@@ -34,7 +34,7 @@ All optional, via environment variables:
 | `IAP_APPS_DIR` | `~/repos/iap-apps` |
 | `IAP_PYTHON` | `$IAP_ODOO_DIR/.venv/bin/python` |
 | `IAP_PORT` | `8086` |
-| `IAP_DB` | `iap_ai_db` |
+| `IAP_DB` | `iap` |
 
 State (pid file, log) lives in `~/.local/state/iap/`.
 `iap_ai`'s own Python requirements are layered on top of the Odoo venv for each run,
