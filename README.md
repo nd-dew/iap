@@ -19,7 +19,7 @@ flowchart LR
 ## Install
 
 ```bash
-uv tool install git+ssh://git@github.com/nd-dew/iap.git
+uv tool install git+https://github.com/nd-dew/iap
 ```
 
 ## Usage
