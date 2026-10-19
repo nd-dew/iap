@@ -31,12 +31,12 @@ See `iap --help` for the rest.
 
 ## How it works
 
-The IAP service is itself an Odoo module (`odoo_ai`, from iap-apps), so `iap start` runs it
-in the background as a separate Odoo 19.4 server on `localhost:8086`, with its own `iap`
-database (created on first start). It runs in test mode, so there are no credit checks, and
-it calls OpenAI and Vertex / Gemini with the keys from your environment (`OPENAI_API_KEY`,
-`GEAP_SERVICE_ACCOUNT`). `iap connect` then sets `ai.endpoint` in your local databases to
-that address, so their AI requests go to your local service instead of Odoo's servers.
+The IAP service is just an Odoo module from iap-apps. `iap start` runs it on its own
+Odoo 19.4 server in the background. It uses your own AI keys (`OPENAI_API_KEY`,
+`GEAP_SERVICE_ACCOUNT`), and skips credit checks.
+
+`iap connect` tells your local databases to send their AI requests to this server
+instead of Odoo's.
 
 ## Configuration
 
