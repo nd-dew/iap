@@ -22,16 +22,12 @@ uv tool install git+ssh://git@github.com/nd-dew/iap.git
 ## Usage
 
 ```bash
-iap                 # start it, or show status + recent logs if already running
-iap connect <db>    # point a dev database's ai.endpoint at the local IAP
-iap connect <db> --reset   # back to the public endpoint
-iap connect --all   # every local DB with ai installed (skips ones set to another endpoint, unless --force)
-iap status          # status, how odoo / enterprise / iap-apps compare to upstream, recent logs
-iap fetch           # fetch upstream first, for fresh 'behind' counts (or: iap status --fetch)
-iap logs -f         # follow the log
-iap restart -u      # restart and update odoo_ai (e.g. after switching iap-apps branch)
-iap stop
+iap start           # start the local IAP service
+iap connect --all   # point your local Odoo databases at it
+iap logs -f         # watch it work
 ```
+
+See `iap --help` for the rest.
 
 The service runs in `ODOO_AI_TEST_MODE` (no credit checks) and uses the provider
 keys from your environment (`OPENAI_API_KEY`, and `GEAP_SERVICE_ACCOUNT` for Vertex / Gemini).
