@@ -1,6 +1,11 @@
 # iap
 
-Run Odoo's AI service (IAP) on your machine, so your local Odoo databases can use AI.
+`iap` is a script that runs iap-apps on Odoo 19.4, and points your local Odoo at it.
+
+Extra sparkles:
+- Tells you when your local IAP code is stale
+- Shows the IAP logs
+- Runs in the background (not attached to a terminal)
 
 ![iap start, then iap connect --all](docs/demo.gif)
 
@@ -10,8 +15,6 @@ flowchart LR
     apps["iap-apps"] --> iap
     iap --> odoo["your local Odoo"]
 ```
-
-`iap` runs the iap-apps AI service on Odoo 19.4, and points your local Odoo at it.
 
 ## Install
 
