@@ -179,11 +179,11 @@ def _client_rows(limit: int = 5) -> Group | str:
     if not names:
         return "[dim]no Odoo server running, and no requests yet[/]"
     t = Table(box=None, padding=(0, 2, 0, 0), header_style="dim", show_edge=False)
-    # Only the name gives way on narrow terminals; ~60 columns go to the panel, labels and other columns
-    t.add_column("database", no_wrap=True, overflow="ellipsis", max_width=max(8, console.width - 60))
+    # Only the name gives way on narrow terminals; ~64 columns go to the panel, labels and other columns
+    t.add_column("database", no_wrap=True, overflow="ellipsis", max_width=max(8, console.width - 64))
     t.add_column("server", no_wrap=True, min_width=7)
     t.add_column("AI requests to", no_wrap=True, min_width=16)
-    t.add_column("last one here", no_wrap=True, min_width=12)
+    t.add_column("last IAP request", no_wrap=True, min_width=16)
     elsewhere = []
     for name in names:
         info = _ai_info(name)
