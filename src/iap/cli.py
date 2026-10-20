@@ -170,6 +170,25 @@ def _show_logs(n: int) -> None:
         console.print(Panel("\n".join(_style_line(l) for l in lines), title=f"last {len(lines)} log lines", title_align="left", border_style="dim"))
 
 
+def _client_rows() -> str:
+    dbs = _client_databases()
+    if not dbs:
+        return "[dim]no local database has the ai module installed[/]"
+    last_used = _last_used()
+    width = max(map(len, dbs))
+    rows = []
+    for name, (endpoint, uuid) in sorted(dbs.items(), key=lambda d: (d[1][0] != ENDPOINT, d[0])):
+        if endpoint == ENDPOINT:
+            age = last_used.get(uuid)
+            used = f"last used {_ago(age)}" if age is not None else "never used"
+            rows.append(f"[green]●[/] {name:<{width}}  [dim]{used}[/]")
+        elif endpoint:
+            rows.append(f"[yellow]→[/] {name:<{width}}  [dim]{endpoint}[/]")
+        else:
+            rows.append(f"[dim]○ {name:<{width}}  public endpoint[/]")
+    return "\n".join(rows)
+
+
 def _show_status(pid: int | None, log_lines: int = 15) -> None:
     healthy = _healthy()
     if pid and healthy:
@@ -190,6 +209,8 @@ def _show_status(pid: int | None, log_lines: int = 15) -> None:
     t.add_row("endpoint", ENDPOINT)
     t.add_row("database", DB)
     t.add_row("log", str(LOG_FILE))
+    t.add_row()
+    t.add_row("client dbs", _client_rows())
     t.add_row()
     for name, path in REPOS.items():
         t.add_row(name, f"{path}\n{_repo_state(path)}")
@@ -338,23 +359,37 @@ def logs(
     _show_logs(lines)
 
 
-def _ai_databases() -> list[str]:
-    """Local databases with the `ai` module installed (other than the IAP's own)."""
+def _client_databases() -> dict[str, tuple[str, str]]:
+    """Local databases with the `ai` module installed (other than the IAP's own): {name: (ai.endpoint, database.uuid)}."""
     res = subprocess.run(
         ["psql", "-d", "postgres", "-Atc", "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname"],
         capture_output=True, text=True,
     )
-    dbs = []
+    dbs = {}
     for name in res.stdout.split():
         if name in ("postgres", DB):
             continue
         check = subprocess.run(
-            ["psql", "-d", name, "-Atc", "SELECT 1 FROM ir_module_module WHERE name = 'ai' AND state = 'installed'"],
+            ["psql", "-d", name, "-AtF", "\t", "-c",
+             "SELECT (SELECT value FROM ir_config_parameter WHERE key = 'ai.endpoint'),"
+             " (SELECT value FROM ir_config_parameter WHERE key = 'database.uuid')"
+             " FROM ir_module_module WHERE name = 'ai' AND state = 'installed'"],
             capture_output=True, text=True,
         )
-        if check.stdout.strip() == "1":  # non-Odoo databases just fail the query
-            dbs.append(name)
+        if check.stdout.strip():  # non-Odoo databases just fail the query
+            endpoint, _, uuid = check.stdout.rstrip("\n").partition("\t")
+            dbs[name] = (endpoint, uuid)
     return dbs
+
+
+def _last_used() -> dict[str, float]:
+    """Seconds since each client dbuuid last sent a completion job to the IAP (sync calls and embeddings leave no trace)."""
+    res = subprocess.run(
+        ["psql", "-d", DB, "-AtF", "\t", "-c",
+         "SELECT dbuuid, EXTRACT(EPOCH FROM now() AT TIME ZONE 'UTC' - max(create_date)) FROM odoo_ai_job GROUP BY dbuuid"],
+        capture_output=True, text=True,
+    )
+    return {uuid: float(age) for uuid, age in (l.split("\t") for l in res.stdout.splitlines())}
 
 
 def _current_endpoint(db: str) -> str:
@@ -395,7 +430,7 @@ def connect(
     if db and not _db_exists(db):
         console.print(f"[red]Database {db!r} does not exist.[/]")
         raise typer.Exit(1)
-    dbs = [db] if db else _ai_databases()
+    dbs = [db] if db else list(_client_databases())
     if not dbs:
         console.print("[dim]No local database has the ai module installed.[/]")
         return
