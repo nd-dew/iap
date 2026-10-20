@@ -15,7 +15,7 @@ from collections import deque
 from pathlib import Path
 
 import typer
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
 
@@ -171,16 +171,32 @@ def _show_logs(n: int) -> None:
         console.print(Panel("\n".join(_style_line(l) for l in lines), title=f"last {len(lines)} log lines", title_align="left", border_style="dim"))
 
 
-def _recent_client_rows(limit: int = 5) -> str:
-    clients = _clients(limit)
-    if not clients:
-        return "[dim]none yet; point a database at it with iap connect <db>[/]"
-    width = max(len(c[1]) for c in clients)
-    rows = [
-        f"{name:<{width}}  [dim]{host.removeprefix('localhost')}  {_ago(age)}[/]"
-        for _, name, host, age in clients
-    ]
-    return "\n".join(rows + ["[dim]all local databases: iap dbs[/]"])
+def _client_rows(limit: int = 5) -> Group | str:
+    """Running Odoo servers and recent IAP clients, with where each one sends its AI requests."""
+    running = _running_servers()
+    recent = {name: age for _, name, _, age in _clients(limit)}
+    names = [*running, *(n for n in recent if n not in running)]
+    if not names:
+        return "[dim]no running Odoo server or recent client[/]"
+    t = Table.grid(padding=(0, 2))
+    t.add_column(no_wrap=True, overflow="ellipsis", min_width=8)
+    t.add_column(no_wrap=True, style="dim")
+    t.add_column(no_wrap=True)
+    elsewhere = []
+    for name in names:
+        info = _ai_info(name)
+        if info is None:
+            target = "[dim]no ai module[/]"
+        elif info[0] == ENDPOINT:
+            age = recent.get(name)
+            target = f"[green]local IAP[/]  [dim]{f'used {_ago(age)}' if age is not None else 'not used yet'}[/]"
+        else:
+            where = urllib.parse.urlsplit(info[0]).netloc or "public Odoo AI"
+            target = f"[yellow]{where}[/]"
+            elsewhere.append(name)
+        t.add_row(name, f":{running[name]}" if name in running else "stopped", target)
+    hints = [f"[yellow]to use the local IAP: iap connect {name}[/]" for name in elsewhere]
+    return Group(t, *hints, "[dim]all local databases: iap dbs[/]")
 
 
 def _show_status(pid: int | None) -> None:
@@ -204,7 +220,7 @@ def _show_status(pid: int | None) -> None:
     t.add_row("database", DB)
     t.add_row("log", str(LOG_FILE))
     t.add_row()
-    t.add_row("recent clients", _recent_client_rows())
+    t.add_row("clients", _client_rows())
     t.add_row()
     for name, path in REPOS.items():
         t.add_row(name, f"{path}\n{_repo_state(path)}")
@@ -350,27 +366,54 @@ def logs(
     _show_logs(lines)
 
 
+def _ai_info(db: str) -> tuple[str, str] | None:
+    """(ai.endpoint, database.uuid) of a database with the `ai` module installed, else None."""
+    res = subprocess.run(
+        ["psql", "-d", db, "-AtF", "\t", "-c",
+         "SELECT (SELECT value FROM ir_config_parameter WHERE key = 'ai.endpoint'),"
+         " (SELECT value FROM ir_config_parameter WHERE key = 'database.uuid')"
+         " FROM ir_module_module WHERE name = 'ai' AND state = 'installed'"],
+        capture_output=True, text=True,
+    )
+    if not res.stdout.strip():  # non-Odoo databases just fail the query
+        return None
+    endpoint, _, uuid = res.stdout.rstrip("\n").partition("\t")
+    return endpoint, uuid
+
+
 def _client_databases() -> dict[str, tuple[str, str]]:
     """Local databases with the `ai` module installed (other than the IAP's own): {name: (ai.endpoint, database.uuid)}."""
     res = subprocess.run(
         ["psql", "-d", "postgres", "-Atc", "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname"],
         capture_output=True, text=True,
     )
-    dbs = {}
-    for name in res.stdout.split():
-        if name in ("postgres", DB):
-            continue
-        check = subprocess.run(
-            ["psql", "-d", name, "-AtF", "\t", "-c",
-             "SELECT (SELECT value FROM ir_config_parameter WHERE key = 'ai.endpoint'),"
-             " (SELECT value FROM ir_config_parameter WHERE key = 'database.uuid')"
-             " FROM ir_module_module WHERE name = 'ai' AND state = 'installed'"],
-            capture_output=True, text=True,
-        )
-        if check.stdout.strip():  # non-Odoo databases just fail the query
-            endpoint, _, uuid = check.stdout.rstrip("\n").partition("\t")
-            dbs[name] = (endpoint, uuid)
-    return dbs
+    return {
+        name: info for name in res.stdout.split()
+        if name not in ("postgres", DB) and (info := _ai_info(name))
+    }
+
+
+def _running_servers() -> dict[str, str]:
+    """Databases a running Odoo server is connected to, per Postgres: {db: http port}."""
+    res = subprocess.run(
+        ["psql", "-d", "postgres", "-AtF", "\t", "-v", f"db={DB}"],
+        input="SELECT datname, min(substr(application_name, 6)) FROM pg_stat_activity"
+              " WHERE application_name LIKE 'odoo-%' AND datname NOT IN ('postgres', :'db') GROUP BY datname ORDER BY datname",
+        capture_output=True, text=True,
+    )
+    servers = {}
+    for line in res.stdout.splitlines():
+        db, pid = line.split("\t")
+        # Odoo names its connections odoo-<pid>; that process's command line gives the HTTP port
+        args = subprocess.run(["ps", "-ww", "-o", "args=", "-p", pid], capture_output=True, text=True).stdout.split()
+        port = "8069"
+        for i, a in enumerate(args):
+            if a in ("-p", "--http-port") and i + 1 < len(args):
+                port = args[i + 1]
+            elif a.startswith("--http-port="):
+                port = a.partition("=")[2]
+        servers[db] = port
+    return servers
 
 
 def _clients(limit: int | None = None) -> list[tuple[str, str, str, float]]:
