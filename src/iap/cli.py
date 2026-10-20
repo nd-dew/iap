@@ -406,8 +406,10 @@ def _set_endpoint(db: str, reset: bool) -> str | None:
             "INSERT INTO ir_config_parameter (key, value) VALUES ('ai.endpoint', :'endpoint') "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
         )
+    # Config parameters are ormcached; signal the 'stable' cache so a running server drops its copy
+    sql += ";\nINSERT INTO orm_signaling_stable DEFAULT VALUES;"
     res = subprocess.run(
-        ["psql", "-d", db, "-v", "ON_ERROR_STOP=1", "-v", f"endpoint={ENDPOINT}", "-q"],
+        ["psql", "-d", db, "-1", "-v", "ON_ERROR_STOP=1", "-v", f"endpoint={ENDPOINT}", "-q"],
         input=sql, capture_output=True, text=True,
     )
     return res.stderr.strip() if res.returncode else None
