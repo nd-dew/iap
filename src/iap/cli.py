@@ -1,7 +1,7 @@
 """Run the Odoo AI IAP service (iap-apps/iap_ai) locally.
 
-`iap` with no arguments starts the service, or shows its status and recent
-logs if it is already running. Dev databases are pointed at it with
+`iap` with no arguments starts the service, or shows its status if it is
+already running. Dev databases are pointed at it with
 `iap connect <db>`, which sets their `ai.endpoint` parameter.
 """
 import os
@@ -189,7 +189,7 @@ def _client_rows() -> str:
     return "\n".join(rows)
 
 
-def _show_status(pid: int | None, log_lines: int = 15) -> None:
+def _show_status(pid: int | None) -> None:
     healthy = _healthy()
     if pid and healthy:
         state = "[bold green]● running[/]"
@@ -215,8 +215,6 @@ def _show_status(pid: int | None, log_lines: int = 15) -> None:
     for name, path in REPOS.items():
         t.add_row(name, f"{path}\n{_repo_state(path)}")
     console.print(Panel(t, title="local IAP", title_align="left"))
-    if log_lines:
-        _show_logs(log_lines)
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +282,7 @@ def _start(update: bool = False) -> None:
             time.sleep(0.5)
         else:
             console.print(f"[yellow]Not healthy after {START_TIMEOUT}s; still running, check the logs.[/]")
-    _show_status(proc.pid, log_lines=0)
+    _show_status(proc.pid)
     console.print(f"Point a database at it with [bold]iap connect <db>[/].")
 
 
@@ -306,7 +304,7 @@ def _stop() -> bool:
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
-    """Start the IAP service, or show its status and logs if it is already running."""
+    """Start the IAP service, or show its status if it is already running."""
     if ctx.invoked_subcommand is None:
         _start()
 
@@ -332,20 +330,19 @@ def restart(update: bool = typer.Option(False, "--update", "-u", help="Update th
 
 @app.command()
 def status(
-    lines: int = typer.Option(15, "--lines", "-n", help="Log lines to show."),
     fetch: bool = typer.Option(False, "--fetch", "-f", help="Fetch upstream first, for fresh 'behind' counts."),
 ) -> None:
-    """Show whether the IAP service is running, how its code compares to upstream, and recent logs."""
+    """Show whether the IAP service is running, which databases use it, and how its code compares to upstream."""
     if fetch:
         _fetch(list(REPOS.values()))
-    _show_status(_read_pid(), log_lines=lines)
+    _show_status(_read_pid())
 
 
 @app.command()
 def fetch() -> None:
     """Fetch upstream for the Odoo and iap-apps repos the service runs on, and show the status."""
     _fetch(list(REPOS.values()))
-    _show_status(_read_pid(), log_lines=0)
+    _show_status(_read_pid())
 
 
 @app.command()
