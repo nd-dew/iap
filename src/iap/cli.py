@@ -9,6 +9,7 @@ import signal
 import socket
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 from collections import deque
 from pathlib import Path
@@ -170,23 +171,16 @@ def _show_logs(n: int) -> None:
         console.print(Panel("\n".join(_style_line(l) for l in lines), title=f"last {len(lines)} log lines", title_align="left", border_style="dim"))
 
 
-def _client_rows() -> str:
-    dbs = _client_databases()
-    if not dbs:
-        return "[dim]no local database has the ai module installed[/]"
-    last_used = _last_used()
-    width = max(map(len, dbs))
-    rows = []
-    for name, (endpoint, uuid) in sorted(dbs.items(), key=lambda d: (d[1][0] != ENDPOINT, d[0])):
-        if endpoint == ENDPOINT:
-            age = last_used.get(uuid)
-            used = f"last used {_ago(age)}" if age is not None else "never used"
-            rows.append(f"[green]●[/] {name:<{width}}  [dim]{used}[/]")
-        elif endpoint:
-            rows.append(f"[yellow]→[/] {name:<{width}}  [dim]{endpoint}[/]")
-        else:
-            rows.append(f"[dim]○ {name:<{width}}  public endpoint[/]")
-    return "\n".join(rows)
+def _recent_client_rows(limit: int = 5) -> str:
+    clients = _clients(limit)
+    if not clients:
+        return "[dim]none yet; point a database at it with iap connect <db>[/]"
+    width = max(len(c[1]) for c in clients)
+    rows = [
+        f"{name:<{width}}  [dim]{host.removeprefix('localhost')}  {_ago(age)}[/]"
+        for _, name, host, age in clients
+    ]
+    return "\n".join(rows + ["[dim]all local databases: iap dbs[/]"])
 
 
 def _show_status(pid: int | None) -> None:
@@ -210,7 +204,7 @@ def _show_status(pid: int | None) -> None:
     t.add_row("database", DB)
     t.add_row("log", str(LOG_FILE))
     t.add_row()
-    t.add_row("client dbs", _client_rows())
+    t.add_row("recent clients", _recent_client_rows())
     t.add_row()
     for name, path in REPOS.items():
         t.add_row(name, f"{path}\n{_repo_state(path)}")
@@ -379,14 +373,23 @@ def _client_databases() -> dict[str, tuple[str, str]]:
     return dbs
 
 
-def _last_used() -> dict[str, float]:
-    """Seconds since each client dbuuid last sent a completion job to the IAP (sync calls and embeddings leave no trace)."""
+def _clients(limit: int | None = None) -> list[tuple[str, str, str, float]]:
+    """Databases that sent completions to the IAP, most recent first: (dbuuid, db name, host, seconds ago).
+
+    Read from the IAP's own job table; sync completions, embeddings and transcriptions leave no trace there.
+    """
     res = subprocess.run(
         ["psql", "-d", DB, "-AtF", "\t", "-c",
-         "SELECT dbuuid, EXTRACT(EPOCH FROM now() AT TIME ZONE 'UTC' - max(create_date)) FROM odoo_ai_job GROUP BY dbuuid"],
+         "SELECT dbuuid, (array_agg(webhook_dbname ORDER BY id DESC))[1], (array_agg(webhook_url ORDER BY id DESC))[1],"
+         " EXTRACT(EPOCH FROM now() AT TIME ZONE 'UTC' - max(create_date))"
+         f" FROM odoo_ai_job GROUP BY dbuuid ORDER BY max(create_date) DESC {f'LIMIT {limit}' if limit else ''}"],
         capture_output=True, text=True,
     )
-    return {uuid: float(age) for uuid, age in (l.split("\t") for l in res.stdout.splitlines())}
+    clients = []
+    for line in res.stdout.splitlines():
+        uuid, name, url, age = line.split("\t")
+        clients.append((uuid, name or uuid[:8], urllib.parse.urlsplit(url).netloc, float(age)))
+    return clients
 
 
 def _current_endpoint(db: str) -> str:
@@ -413,6 +416,31 @@ def _set_endpoint(db: str, reset: bool) -> str | None:
         input=sql, capture_output=True, text=True,
     )
     return res.stderr.strip() if res.returncode else None
+
+
+@app.command()
+def dbs() -> None:
+    """List local databases with the ai module, where their AI requests go, and when they last used the local IAP."""
+    with console.status("[bold]scanning local databases ..."):
+        dbs = _client_databases()
+        last = {c[0]: c[3] for c in _clients()}
+    if not dbs:
+        console.print("[dim]No local database has the ai module installed.[/]")
+        return
+    t = Table(box=None, padding=(0, 2), header_style="bold")
+    t.add_column("database", no_wrap=True)
+    t.add_column("ai.endpoint", no_wrap=True)
+    t.add_column("last used", no_wrap=True)
+    for name, (endpoint, uuid) in sorted(dbs.items(), key=lambda d: (d[1][0] != ENDPOINT, d[0])):
+        if endpoint == ENDPOINT:
+            target = "[green]local IAP[/]"
+        elif endpoint:
+            target = f"[yellow]{endpoint}[/]"
+        else:
+            target = "[dim]Odoo (public)[/]"
+        age = last.get(uuid)
+        t.add_row(name, target, _ago(age) if age is not None else "[dim]never[/]")
+    console.print(t)
 
 
 @app.command()
