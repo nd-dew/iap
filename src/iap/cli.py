@@ -17,6 +17,7 @@ from pathlib import Path
 import typer
 from rich.console import Console, Group
 from rich.panel import Panel
+from rich.rule import Rule
 from rich.table import Table
 
 HOME = Path.home()
@@ -179,8 +180,8 @@ def _client_rows(limit: int = 5) -> Group | str:
     if not names:
         return "[dim]no Odoo server running, and no requests yet[/]"
     t = Table(box=None, padding=(0, 2, 0, 0), header_style="dim", show_edge=False)
-    # Only the name gives way on narrow terminals; ~64 columns go to the panel, labels and other columns
-    t.add_column("database", no_wrap=True, overflow="ellipsis", max_width=max(8, console.width - 64))
+    # Only the name gives way on narrow terminals; ~50 columns go to the panel and the other columns
+    t.add_column("database", no_wrap=True, overflow="ellipsis", max_width=max(8, console.width - 50))
     t.add_column("server", no_wrap=True, min_width=7)
     t.add_column("AI requests to", no_wrap=True, min_width=16)
     t.add_column("last IAP request", no_wrap=True, min_width=16)
@@ -205,6 +206,17 @@ def _client_rows(limit: int = 5) -> Group | str:
     return Group(t, *hints, "[dim]all local databases: iap dbs[/]")
 
 
+def _grid() -> Table:
+    t = Table.grid(padding=(0, 2))
+    t.add_column(style="bold", min_width=10)  # same label width in every section
+    t.add_column()
+    return t
+
+
+def _section(title: str) -> Group:
+    return Group("", Rule(f"[dim]{title}[/]", align="left", style="dim"))
+
+
 def _show_status(pid: int | None) -> None:
     healthy = _healthy()
     if pid and healthy:
@@ -216,21 +228,20 @@ def _show_status(pid: int | None) -> None:
     else:
         state = "[bold red]○ stopped[/]"
 
-    t = Table.grid(padding=(0, 2))
-    t.add_column(style="bold")
-    t.add_column()
-    t.add_row("state", state)
+    service = _grid()
+    service.add_row("state", state)
     if pid:
-        t.add_row("pid", f"{pid}  (up {_uptime(pid)})")
-    t.add_row("endpoint", ENDPOINT)
-    t.add_row("database", DB)
-    t.add_row("log", str(LOG_FILE))
-    t.add_row()
-    t.add_row("clients", _client_rows())
-    t.add_row()
+        service.add_row("pid", f"{pid}  (up {_uptime(pid)})")
+    service.add_row("endpoint", ENDPOINT)
+    service.add_row("database", DB)
+    service.add_row("log", str(LOG_FILE))
+    code = _grid()
     for name, path in REPOS.items():
-        t.add_row(name, f"{path}\n{_repo_state(path)}")
-    console.print(Panel(t, title="local IAP", title_align="left"))
+        code.add_row(name, f"{path}\n{_repo_state(path)}")
+    console.print(Panel(
+        Group(service, _section("client databases"), _client_rows(), _section("code"), code),
+        title="local IAP", title_align="left",
+    ))
 
 
 # ---------------------------------------------------------------------------
