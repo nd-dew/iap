@@ -172,30 +172,36 @@ def _show_logs(n: int) -> None:
 
 
 def _client_rows(limit: int = 5) -> Group | str:
-    """Running Odoo servers and recent IAP clients, with where each one sends its AI requests."""
-    running = _running_servers()
+    """Databases in use (a server is running on them) or that recently sent requests to the IAP."""
+    running = _running_databases()
     recent = {name: age for _, name, _, age in _clients(limit)}
     names = [*running, *(n for n in recent if n not in running)]
     if not names:
-        return "[dim]no running Odoo server or recent client[/]"
-    t = Table.grid(padding=(0, 2))
-    t.add_column(no_wrap=True, overflow="ellipsis", min_width=8)
-    t.add_column(no_wrap=True, style="dim")
-    t.add_column(no_wrap=True)
+        return "[dim]no Odoo server running, and no requests yet[/]"
+    t = Table(box=None, padding=(0, 2, 0, 0), header_style="dim", show_edge=False)
+    # Only the name gives way on narrow terminals; ~60 columns go to the panel, labels and other columns
+    t.add_column("database", no_wrap=True, overflow="ellipsis", max_width=max(8, console.width - 60))
+    t.add_column("server", no_wrap=True, min_width=7)
+    t.add_column("AI requests to", no_wrap=True, min_width=16)
+    t.add_column("last one here", no_wrap=True, min_width=12)
     elsewhere = []
     for name in names:
         info = _ai_info(name)
         if info is None:
             target = "[dim]no ai module[/]"
         elif info[0] == ENDPOINT:
-            age = recent.get(name)
-            target = f"[green]local IAP[/]  [dim]{f'used {_ago(age)}' if age is not None else 'not used yet'}[/]"
+            target = "[green]this IAP[/]"
         else:
-            where = urllib.parse.urlsplit(info[0]).netloc or "public Odoo AI"
-            target = f"[yellow]{where}[/]"
+            target = f"[yellow]{urllib.parse.urlsplit(info[0]).netloc or 'Odoo (public)'}[/]"
             elsewhere.append(name)
-        t.add_row(name, f":{running[name]}" if name in running else "stopped", target)
-    hints = [f"[yellow]to use the local IAP: iap connect {name}[/]" for name in elsewhere]
+        age = recent.get(name)
+        t.add_row(
+            name,
+            "running" if name in running else "[dim]stopped[/]",
+            target,
+            _ago(age) if age is not None else "[dim]never[/]",
+        )
+    hints = [f"[yellow]point it here: iap connect {name}[/]" for name in elsewhere]
     return Group(t, *hints, "[dim]all local databases: iap dbs[/]")
 
 
@@ -393,27 +399,15 @@ def _client_databases() -> dict[str, tuple[str, str]]:
     }
 
 
-def _running_servers() -> dict[str, str]:
-    """Databases a running Odoo server is connected to, per Postgres: {db: http port}."""
+def _running_databases() -> list[str]:
+    """Databases a running Odoo server is connected to, per Postgres (Odoo names its connections odoo-<pid>)."""
     res = subprocess.run(
-        ["psql", "-d", "postgres", "-AtF", "\t", "-v", f"db={DB}"],
-        input="SELECT datname, min(substr(application_name, 6)) FROM pg_stat_activity"
-              " WHERE application_name LIKE 'odoo-%' AND datname NOT IN ('postgres', :'db') GROUP BY datname ORDER BY datname",
+        ["psql", "-d", "postgres", "-At", "-v", f"db={DB}"],
+        input="SELECT DISTINCT datname FROM pg_stat_activity"
+              " WHERE application_name LIKE 'odoo-%' AND datname NOT IN ('postgres', :'db') ORDER BY datname",
         capture_output=True, text=True,
     )
-    servers = {}
-    for line in res.stdout.splitlines():
-        db, pid = line.split("\t")
-        # Odoo names its connections odoo-<pid>; that process's command line gives the HTTP port
-        args = subprocess.run(["ps", "-ww", "-o", "args=", "-p", pid], capture_output=True, text=True).stdout.split()
-        port = "8069"
-        for i, a in enumerate(args):
-            if a in ("-p", "--http-port") and i + 1 < len(args):
-                port = args[i + 1]
-            elif a.startswith("--http-port="):
-                port = a.partition("=")[2]
-        servers[db] = port
-    return servers
+    return res.stdout.split()
 
 
 def _clients(limit: int | None = None) -> list[tuple[str, str, str, float]]:
